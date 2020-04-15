@@ -1,5 +1,6 @@
 from flask import Flask, Response, request, abort
 import datetime
+from datetime import datetime as dt
 import json
 import os
 import logging
@@ -8,6 +9,9 @@ from google.cloud import storage
 from openssl_signer import OpenSSLSigner
 
 app = Flask(__name__)
+DT_PATTERN = os.environ.get('DT_PATTERN', "%Y-%m-%d %H:%M:%S.%f%z")
+LIMIT = int(os.environ.get("LIMIT")) if os.environ.get("LIMIT") else None
+FIELDS = "nextPageToken,items(name,generation,updated)"
 
 if os.environ.get("PROFILE"):
     from werkzeug.middleware.profiler import ProfilerMiddleware
@@ -33,19 +37,39 @@ if credentials:
 
 @app.route("/datasets/<bucket_name>/entities", methods=["GET"])
 def get_entities(bucket_name):
-    logging.info(f"serving request for bucket {bucket_name}")
+    logging.info(f"serving request {request} for bucket {bucket_name}")
     """
     Endpoint to read entities from gcp bucket, add signed url and return
     Available query parameters (all optional)
         expire: date time in format %Y-%m-%d %H:%M:%S - overrides default expire time
         with_subfolders: False by default if assigned will include blobs from subfolders
         with_prefix: optional, to filter blobs
+        since : will be compared with update field for each file and only newer files will be returned if set
+        do_not_sign: will not create signed url's if set to true 
     :return:
     """
 
     set_expire = request.args.get('expire')
     with_subfolders = request.args.get('with_subfolders')
     with_prefix = request.args.get('with_prefix')
+    since = request.args.get('since')
+    do_not_sign = bool(request.args.get('do_not_sign', False))
+
+    if since is not None:
+        logging.info(f'got since: {since}')
+        try:
+            # dirty hack for timezone
+            # by default we get datetime where timezone part contains : and python datetime doesn't support it
+            # by default since contains + in timezone part i.e. +02:00
+            # and + becomes space " " when it sent as HTTP query param
+            if ":" == since[-3]:
+                since = since[:-3] + since[-2:]
+                since = since[:-6] + '+' + since[-4:]
+            since = dt.strptime(since, DT_PATTERN)
+        except ValueError as e:
+            logging.warning(e)
+            logging.warning(f"couldn't parse datetime from since: {since}")
+            since = None
 
     def generate():
         """Lists all the blobs in the bucket."""
@@ -60,32 +84,47 @@ def get_entities(bucket_name):
         else:
             expiration = datetime.datetime.strptime(set_expire, '%Y-%m-%d %H:%M:%S')
 
-        iterator = storage_client.list_blobs(bucket_name, prefix=with_prefix,
-                                             max_results=int(os.environ.get("LIMIT")) if os.environ.get(
-                                                 "LIMIT") else None,
-                                             fields="nextPageToken,items(name,generation,updated)")
+        iterator = storage_client.list_blobs(bucket_name, prefix=with_prefix, max_results=LIMIT, fields=FIELDS)
+
         first = True
         yield "["
 
-        for blob in iterator:
-            entity = {"_id": blob.name}
-            if '/' in entity["_id"] and not with_subfolders:  # take only root folder
-                continue
+        while True:
+            for blob in iterator:
+                if since is not None and blob.updated < since:
+                    continue
 
-            if entity["_id"].endswith("/"):  # subfolder object
-                continue
+                entity = {"_id": blob.name}
+                if '/' in entity["_id"] and not with_subfolders:  # take only root folder
+                    continue
 
-            entity["file_id"] = entity["_id"]
+                if entity["_id"].endswith("/"):  # subfolder object
+                    logging.info(f'skipping folder object {blob.name}')
+                    continue
 
-            entity["file_url"] = blob.generate_signed_url(expiration, method="GET")
-            entity["updated"] = str(blob.updated)
-            entity["generation"] = blob.generation
+                entity["file_id"] = entity["_id"]
 
-            if not first:
-                yield ","
-            yield json.dumps(entity)
-            count += 1
-            first = False
+                if not do_not_sign:
+                    entity["file_url"] = blob.generate_signed_url(expiration, method="GET")
+
+                entity["updated"] = str(blob.updated)
+                entity["_updated"] = entity["updated"]
+                entity["generation"] = blob.generation
+
+                if not first:
+                    yield ","
+                yield json.dumps(entity)
+
+                count += 1
+                first = False
+            next_page_token = iterator.next_page_token
+
+            logging.info(f'batch of {iterator.num_results} items successfully processed')
+            if next_page_token is None or iterator.num_results < LIMIT:
+                break
+
+            iterator = storage_client.list_blobs(bucket_name, prefix=with_prefix, page_token=next_page_token,
+                                                 max_results=LIMIT, fields=FIELDS)
         yield "]"
         logging.info(f"{count} elements processed")
 
@@ -151,7 +190,7 @@ def upload(bucket_name):
         if local_path:
             filename = f"{local_path}/{filename}"
         blob = bucket.blob(filename)
-        blob.content_type=content_type
+        blob.content_type = content_type
         blob.upload_from_file(files[file])
     return Response()
 
@@ -179,8 +218,8 @@ def sink(bucket_name):
                 blob.upload_from_string(json.dumps(data).encode("utf-8"), content_type="application/json")
                 logger.info('File uploaded to {}.'.format(filename))
     except Exception as e:
-            logger.error(str(e))
-            abort(type(e).__name__, str(e))
+        logger.error(str(e))
+        abort(type(e).__name__, str(e))
 
     return Response()
 
@@ -194,7 +233,7 @@ if __name__ == "__main__":
     stdout_handler = logging.StreamHandler()
     stdout_handler.setFormatter(logging.Formatter(format_string))
     logger.addHandler(stdout_handler)
-    debug = True if os.environ.get("PROFILE") else False
+    debug = True if os.environ.get("PROFILE") or os.environ.get('DEBUG') else False
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
     logging.info(f"starting service v.{__version__}")
     port = os.environ.get('PORT', 5000)

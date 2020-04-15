@@ -1,6 +1,6 @@
 Flask==1.1.1
 Werkzeug==0.16.0
-google-cloud-storage==1.20.0
+google-cloud-storage==1.26.0
 requests==2.22.0
 pyopenssl
 cherrypy==18.3.0

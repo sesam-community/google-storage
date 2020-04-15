@@ -8,6 +8,9 @@
 
 `GOOGLE_APPLICATION_CREDENTIALS_CONTENT` - Content of Google Storage credential file. This content is written to the file specified in `GOOGLE_APPLICATION_CREDENTIALS`. 
 
+`DT_PATTERN` - since datetime pattern, by default "%Y-%m-%d %H:%M:%S.%f%z"  
+
+`LIMIT` - if limit list result to LIMIT entities and use paging to retrieve multiple batches, not set by default  
 ## Usage
 
 The microservice listens to the following endpoints at port 5000:
@@ -19,6 +22,8 @@ Available query parameters (all optional)
 * expire: date time in format %Y-%m-%d %H:%M:%S - overrides default expire time
 * with_subfolders: False by default if assigned will include blobs from subfolders
 * with_prefix: to filter blobs by prefix
+* since : will be compared with update field for each file and only newer files will be returned if set
+* do_not_sign: will not create signed url's if set to true 
 ```
 [
     {
