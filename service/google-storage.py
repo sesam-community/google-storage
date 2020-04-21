@@ -236,24 +236,4 @@ if __name__ == "__main__":
     debug = True if os.environ.get("PROFILE") or os.environ.get('DEBUG') else False
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
     logging.info(f"starting service v.{__version__}")
-    port = os.environ.get('PORT', 5000)
-    if debug:
-        app.run(threaded=True, debug=debug, host='0.0.0.0', port=port)
-    else:
-        import cherrypy
-
-        cherrypy.tree.graft(app, '/')
-
-        # Set the configuration of the web server
-        cherrypy.config.update({
-            'environment': 'production',
-            'engine.autoreload_on': False,
-            'log.screen': False,
-            'server.socket_port': int(port),
-            'server.socket_host': '0.0.0.0',
-            'server.thread_pool': 10
-        })
-
-        # Start the CherryPy WSGI web server
-        cherrypy.engine.start()
-        cherrypy.engine.block()
+    app.run(threaded=True, debug=debug, host='0.0.0.0', port=os.environ.get('PORT', 5000))
