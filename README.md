@@ -41,7 +41,7 @@ file path may include slashes to download file from bucket sub-folder
 `/upload/<bucket_name>` - uploads file to bucket
 
 `/sink/<bucket_name>` - Sesam json push sink for sending json entities to a Google Storage Bucket and save them as files.
-entities must have the data and filename properties, data should contain the json to be written to the file, filename should be the name of the file.
+entities must have the data and filename properties, data should contain the json to be written to the file, filename should be the name of the file. Optionally the entities can contain a content_type string property. The default content type is "application/json".
 
 ## Example System Config
 ```
