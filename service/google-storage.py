@@ -205,7 +205,8 @@ def sink(bucket_name):
         for entity in entities:
             filename = entity['filename']
             data = entity['data']
-
+            content_type = entity.get('content_type', "application/json")
+            
             blob = bucket.blob(filename)
 
             if entity['_deleted']:
@@ -215,7 +216,7 @@ def sink(bucket_name):
                 except google.api_core.exceptions.NotFound:
                     logger.info('File {} does not exist in bucket.'.format(filename))
             else:
-                blob.upload_from_string(json.dumps(data).encode("utf-8"), content_type="application/json")
+                blob.upload_from_string(json.dumps(data).encode("utf-8"), content_type=content_type)
                 logger.info('File uploaded to {}.'.format(filename))
     except Exception as e:
         logger.error(str(e))
